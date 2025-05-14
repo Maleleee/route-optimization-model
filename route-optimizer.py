@@ -212,6 +212,11 @@ def create_interactive_map(df, best_order, route_geometries, distance_matrix, du
     # Create the map
     route_map = folium.Map(location=map_center, zoom_start=11)
     
+    # Create feature groups for different layers
+    optimized_route_group = folium.FeatureGroup(name="Optimized Route", show=True)
+    custom_route_group = folium.FeatureGroup(name="Custom Route", show=False)
+    markers_group = folium.FeatureGroup(name="Delivery Stops", show=True)
+    
     # Add markers for all locations
     for i, row in df.iterrows():
         if i == 0:  # Warehouse
@@ -225,10 +230,7 @@ def create_interactive_map(df, best_order, route_geometries, distance_matrix, du
             popup=popup_text,
             icon=icon,
             tooltip=row['Label']
-        ).add_to(route_map)
-    
-    # Create a FeatureGroup for the optimized route
-    optimized_route_group = folium.FeatureGroup(name="Optimized Route")
+        ).add_to(markers_group)
     
     # Add route lines with actual road geometry
     for i in range(len(best_order) - 1):
@@ -270,7 +272,79 @@ def create_interactive_map(df, best_order, route_geometries, distance_matrix, du
             icon=folium.DivIcon(html=f"<div style='font-size:10pt;color:black;font-weight:bold;background-color:white;border-radius:50%;padding:3px;border:2px solid green'>{i+1}</div>"),
         ).add_to(optimized_route_group)
     
+    # Add all feature groups to the map
+    markers_group.add_to(route_map)
     optimized_route_group.add_to(route_map)
+    custom_route_group.add_to(route_map)
+    
+    # Add layer control
+    folium.LayerControl().add_to(route_map)
+    
+    # Make feature groups available to JavaScript
+    route_map.get_root().html.add_child(folium.Element("""
+        <script>
+            // Store feature groups globally
+            window.optimized_route_group = null;
+            window.custom_route_group = null;
+            window.markers_group = null;
+            window.map = null;
+            
+            // Function to initialize feature groups
+            function initializeFeatureGroups() {
+                // Get the map instance
+                var maps = document.querySelectorAll('.folium-map');
+                if (maps.length === 0) {
+                    console.log('Map not found, retrying...');
+                    setTimeout(initializeFeatureGroups, 100);
+                    return;
+                }
+                
+                // Get the Leaflet map instance
+                var mapElement = maps[0];
+                var mapId = mapElement.id;
+                window.map = L.DomUtil.get(mapId)._leaflet_map;
+                
+                if (!window.map) {
+                    console.log('Leaflet map not initialized, retrying...');
+                    setTimeout(initializeFeatureGroups, 100);
+                    return;
+                }
+                
+                // Find feature groups by their names
+                window.map.eachLayer(function(layer) {
+                    if (layer instanceof L.FeatureGroup) {
+                        if (layer.options.name === "Optimized Route") {
+                            window.optimized_route_group = layer;
+                        } else if (layer.options.name === "Custom Route") {
+                            window.custom_route_group = layer;
+                        } else if (layer.options.name === "Delivery Stops") {
+                            window.markers_group = layer;
+                        }
+                    }
+                });
+                
+                // Verify all groups are initialized
+                if (window.optimized_route_group && window.custom_route_group && window.markers_group) {
+                    console.log('All feature groups initialized successfully');
+                } else {
+                    console.log('Some feature groups not initialized, retrying...');
+                    setTimeout(initializeFeatureGroups, 100);
+                }
+            }
+            
+            // Initialize when document is ready
+            document.addEventListener('DOMContentLoaded', function() {
+                console.log('Document ready, initializing feature groups...');
+                initializeFeatureGroups();
+            });
+            
+            // Also try to initialize when the map is loaded
+            window.addEventListener('load', function() {
+                console.log('Window loaded, checking feature groups initialization...');
+                initializeFeatureGroups();
+            });
+        </script>
+    """))
     
     # Add an improved legend with better styling
     legend_html = '''
@@ -325,6 +399,7 @@ def create_interactive_map(df, best_order, route_geometries, distance_matrix, du
     # Convert route_geometries to a format suitable for JavaScript
     js_geometries = {}
     for key, coords in route_geometries.items():
+        # Convert tuple key to string key
         js_geometries[f"{key[0]},{key[1]}"] = coords
     
     # Create JavaScript for the interactive sidebar
@@ -338,6 +413,13 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
     route_json = json.dumps(route_data)
     geometries_json = json.dumps(geometries)
     
+    # Initialize delivery progress data
+    delivery_progress = {
+        "completed": 0,
+        "total": len(route_data) - 1  # Exclude warehouse
+    }
+    delivery_progress_json = json.dumps(delivery_progress)
+    
     # Create the sidebar HTML/JavaScript
     sidebar_html = f"""
     <script>
@@ -346,6 +428,9 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
         
         // Route geometries data
         var routeGeometries = {geometries_json};
+        
+        // Initialize delivery progress
+        var deliveryProgress = {delivery_progress_json};
         
         // Function to create the sidebar
         function createSidebar() {{
@@ -358,86 +443,232 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
             sidebar.style.maxHeight = '90%';
             sidebar.style.overflowY = 'auto';
             sidebar.style.backgroundColor = 'white';
-            sidebar.style.padding = '10px';
-            sidebar.style.borderRadius = '5px';
-            sidebar.style.boxShadow = '0 0 10px rgba(0,0,0,0.5)';
+            sidebar.style.padding = '15px';
+            sidebar.style.borderRadius = '8px';
+            sidebar.style.boxShadow = '0 0 15px rgba(0,0,0,0.2)';
             sidebar.style.zIndex = '1000';
+            sidebar.style.fontFamily = 'Arial, sans-serif';
             
-            var header = document.createElement('h3');
-            header.innerHTML = 'Route Planner';
+            // Add header with improved styling
+            var header = document.createElement('div');
+            header.style.marginBottom = '20px';
+            header.innerHTML = `
+                <h2 style="margin: 0 0 10px 0; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px;">
+                    Delivery Route Planner
+                </h2>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="flex: 1;">
+                        <div style="font-size: 0.9em; color: #7f8c8d;">Today's Progress</div>
+                        <div style="font-size: 1.2em; font-weight: bold; color: #2c3e50;">
+                            ${{deliveryProgress.completed}}/${{deliveryProgress.total}} Stops
+                        </div>
+                    </div>
+                    <div style="flex: 1;">
+                        <div style="font-size: 0.9em; color: #7f8c8d;">Estimated Time</div>
+                        <div style="font-size: 1.2em; font-weight: bold; color: #2c3e50;">
+                            {total_hours:.1f} hours
+                        </div>
+                    </div>
+                </div>
+            `;
             sidebar.appendChild(header);
             
-            var description = document.createElement('p');
-            description.innerHTML = 'Select start and end locations to display a custom route.';
-            sidebar.appendChild(description);
+            // Add progress bar
+            var progressBar = document.createElement('div');
+            progressBar.style.height = '8px';
+            progressBar.style.backgroundColor = '#ecf0f1';
+            progressBar.style.borderRadius = '4px';
+            progressBar.style.marginBottom = '20px';
+            progressBar.style.overflow = 'hidden';
             
-            // Create start point dropdown
-            var startLabel = document.createElement('label');
-            startLabel.innerHTML = 'Start Point: ';
-            startLabel.style.display = 'block';
-            startLabel.style.marginTop = '10px';
-            startLabel.style.fontWeight = 'bold';
-            sidebar.appendChild(startLabel);
+            var progressFill = document.createElement('div');
+            progressFill.id = 'progress-fill';
+            progressFill.style.height = '100%';
+            progressFill.style.width = '0%';
+            progressFill.style.backgroundColor = '#3498db';
+            progressFill.style.transition = 'width 0.3s ease';
             
-            var startSelect = document.createElement('select');
-            startSelect.id = 'start-select';
-            startSelect.style.width = '100%';
-            startSelect.style.marginBottom = '10px';
-            startSelect.style.padding = '5px';
-            sidebar.appendChild(startSelect);
+            progressBar.appendChild(progressFill);
+            sidebar.appendChild(progressBar);
             
-            // Create end point dropdown
-            var endLabel = document.createElement('label');
-            endLabel.innerHTML = 'End Point: ';
-            endLabel.style.display = 'block';
-            endLabel.style.marginTop = '10px';
-            endLabel.style.fontWeight = 'bold';
-            sidebar.appendChild(endLabel);
+            // Add About section
+            var aboutSection = document.createElement('div');
+            aboutSection.style.marginBottom = '20px';
+            aboutSection.style.padding = '15px';
+            aboutSection.style.backgroundColor = '#f8f9fa';
+            aboutSection.style.borderRadius = '8px';
+            aboutSection.style.border = '1px solid #e9ecef';
+            aboutSection.innerHTML = `
+                <h3 style="margin: 0 0 10px 0; color: #2c3e50;">Quick Tips</h3>
+                <ul style="margin: 0; padding-left: 20px; color: #34495e;">
+                    <li>Click on stops to mark them as completed</li>
+                    <li>Use the "Show Route" button to plan your next delivery</li>
+                    <li>Check the estimated time for each leg of your journey</li>
+                    <li>Track your progress with the progress bar above</li>
+                </ul>
+            `;
+            sidebar.appendChild(aboutSection);
             
-            var endSelect = document.createElement('select');
-            endSelect.id = 'end-select';
-            endSelect.style.width = '100%';
-            endSelect.style.marginBottom = '10px';
-            endSelect.style.padding = '5px';
-            sidebar.appendChild(endSelect);
+            // Add route planning section
+            var planningSection = document.createElement('div');
+            planningSection.style.marginBottom = '20px';
+            planningSection.style.padding = '15px';
+            planningSection.style.backgroundColor = '#e8f4fc';
+            planningSection.style.borderRadius = '8px';
+            planningSection.innerHTML = `
+                <h3 style="margin: 0 0 15px 0; color: #2c3e50;">Plan Next Delivery</h3>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; color: #2c3e50; font-weight: bold;">Start Point:</label>
+                    <select id="start-select" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #bdc3c7;"></select>
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; color: #2c3e50; font-weight: bold;">End Point:</label>
+                    <select id="end-select" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #bdc3c7;"></select>
+                </div>
+                <button id="show-route-button" style="width: 100%; padding: 10px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; display: none;">
+                    Show Route
+                </button>
+            `;
+            sidebar.appendChild(planningSection);
             
             // Add route info section
             var routeInfo = document.createElement('div');
             routeInfo.id = 'route-info';
-            routeInfo.style.marginTop = '20px';
-            routeInfo.style.padding = '10px';
-            routeInfo.style.backgroundColor = '#f8f8f8';
-            routeInfo.style.borderRadius = '5px';
+            routeInfo.style.marginBottom = '20px';
+            routeInfo.style.padding = '15px';
+            routeInfo.style.backgroundColor = '#f8f9fa';
+            routeInfo.style.borderRadius = '8px';
             routeInfo.style.display = 'none';
+            routeInfo.style.border = '1px solid #e9ecef';
             sidebar.appendChild(routeInfo);
             
             // Add reset button
             var resetButton = document.createElement('button');
             resetButton.id = 'reset-button';
             resetButton.innerHTML = 'Reset Selection';
-            resetButton.style.marginTop = '15px';
-            resetButton.style.padding = '8px 15px';
-            resetButton.style.backgroundColor = '#dc3545';
+            resetButton.style.width = '100%';
+            resetButton.style.padding = '10px';
+            resetButton.style.backgroundColor = '#e74c3c';
             resetButton.style.color = 'white';
             resetButton.style.border = 'none';
             resetButton.style.borderRadius = '4px';
             resetButton.style.cursor = 'pointer';
-            resetButton.style.display = 'none';  // Initially hidden
-            resetButton.style.width = '100%';
+            resetButton.style.fontWeight = 'bold';
+            resetButton.style.display = 'none';
+            resetButton.style.marginBottom = '20px';
             sidebar.appendChild(resetButton);
+            
+            // Add stops list section
+            var stopsHeader = document.createElement('div');
+            stopsHeader.style.marginBottom = '15px';
+            stopsHeader.innerHTML = `
+                <h3 style="margin: 0; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 8px;">
+                    Delivery Stops
+                </h3>
+                <div style="display: flex; justify-content: space-between; margin-top: 10px; color: #7f8c8d; font-size: 0.9em;">
+                    <span>Click to mark as completed</span>
+                    <span id="completed-count">0/${{deliveryProgress.total}}</span>
+                </div>
+            `;
+            sidebar.appendChild(stopsHeader);
+            
+            var stopsList = document.createElement('ol');
+            stopsList.id = 'stops-list';
+            stopsList.style.paddingLeft = '20px';
+            stopsList.style.marginTop = '15px';
+            
+            // Populate the list with improved styling
+            routeData.forEach(function(stop) {{
+                var item = document.createElement('li');
+                item.id = 'stop-item-' + stop.id;
+                item.style.marginBottom = '10px';
+                item.style.padding = '12px';
+                item.style.borderRadius = '8px';
+                item.style.backgroundColor = '#f8f9fa';
+                item.style.cursor = 'pointer';
+                item.style.transition = 'all 0.2s ease';
+                item.style.border = '1px solid #e9ecef';
+                
+                // Extract stop number and location name
+                var stopNumber = stop.label.replace(/\D/g, '');
+                var locationName = stop.label.split(':')[1] || stop.address.split(',')[0];
+                locationName = locationName.trim();
+                
+                item.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="flex: 1; margin-right: 15px;">
+                            <strong style="color: #2c3e50;">Stop #${{stopNumber}}: ${{locationName}}</strong>
+                            <div style="color: #7f8c8d; font-size: 0.9em; margin-top: 4px;">${{stop.address}}</div>
+                        </div>
+                        <div class="completion-indicator" style="width: 24px; height: 24px; min-width: 24px; border-radius: 50%; border: 2px solid #bdc3c7; background-color: white; flex-shrink: 0;"></div>
+                    </div>
+                `;
+                
+                if(stop.hasOwnProperty('distance_to_next')) {{
+                    item.innerHTML += `
+                        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e9ecef;">
+                            <small style="color: #3498db;">
+                                Next: ${{stop.distance_to_next.toFixed(1)}} km, ${{stop.duration_to_next.toFixed(0)}} min
+                            </small>
+                        </div>
+                    `;
+                }}
+                
+                // Add click handler for completion
+                item.onclick = function() {{
+                    if(!this.classList.contains('completed')) {{
+                        this.classList.add('completed');
+                        this.style.backgroundColor = '#e8f5e9';
+                        this.style.border = '1px solid #4caf50';
+                        var indicator = this.querySelector('.completion-indicator');
+                        indicator.style.backgroundColor = '#4caf50';
+                        indicator.style.border = '2px solid #388e3c';
+                        
+                        deliveryProgress.completed++;
+                        updateProgress();
+                    }}
+                }};
+                
+                stopsList.appendChild(item);
+            }});
+            
+            sidebar.appendChild(stopsList);
+            
+            // Add total distance and time
+            var totalInfo = document.createElement('div');
+            totalInfo.style.marginTop = '20px';
+            totalInfo.style.padding = '15px';
+            totalInfo.style.backgroundColor = '#e8f4fc';
+            totalInfo.style.borderRadius = '8px';
+            totalInfo.style.fontWeight = 'bold';
+            totalInfo.style.color = '#2c3e50';
+            totalInfo.innerHTML = `
+                <div style="display: flex; justify-content: space-between;">
+                    <div>
+                        <div style="font-size: 0.9em; color: #7f8c8d;">Total Distance</div>
+                        <div style="font-size: 1.2em;">{total_km:.1f} km</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.9em; color: #7f8c8d;">Total Time</div>
+                        <div style="font-size: 1.2em;">{total_hours:.1f} hours</div>
+                    </div>
+                </div>
+            `;
+            sidebar.appendChild(totalInfo);
             
             // Add a toggle button for the sidebar
             var toggleButton = document.createElement('button');
             toggleButton.innerHTML = '&laquo;';
             toggleButton.style.position = 'absolute';
-            toggleButton.style.right = '10px';
+            toggleButton.style.right = '-30px';
             toggleButton.style.top = '10px';
-            toggleButton.style.backgroundColor = '#007bff';
+            toggleButton.style.backgroundColor = '#3498db';
             toggleButton.style.color = 'white';
             toggleButton.style.border = 'none';
-            toggleButton.style.borderRadius = '5px';
-            toggleButton.style.padding = '5px 10px';
+            toggleButton.style.borderRadius = '0 4px 4px 0';
+            toggleButton.style.padding = '8px 12px';
             toggleButton.style.cursor = 'pointer';
+            toggleButton.style.fontSize = '16px';
             toggleButton.onclick = function() {{
                 if(sidebar.style.left === '10px') {{
                     sidebar.style.left = '-330px';
@@ -449,43 +680,25 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
             }};
             sidebar.appendChild(toggleButton);
             
-            // Add stops list section
-            var stopsHeader = document.createElement('h4');
-            stopsHeader.innerHTML = 'Optimized Route';
-            stopsHeader.style.marginTop = '20px';
-            sidebar.appendChild(stopsHeader);
-            
-            var stopsList = document.createElement('ol');
-            stopsList.id = 'stops-list';
-            stopsList.style.paddingLeft = '20px';
-            
-            // Populate the list
-            routeData.forEach(function(stop) {{
-                var item = document.createElement('li');
-                item.id = 'stop-item-' + stop.id;
-                item.innerHTML = '<strong>' + stop.label + '</strong>: ' + stop.address;
-                
-                if(stop.hasOwnProperty('distance_to_next')) {{
-                    item.innerHTML += '<br><small>Next: ' + stop.distance_to_next.toFixed(1) + 
-                        ' km, ' + stop.duration_to_next.toFixed(0) + ' min</small>';
-                }}
-                
-                stopsList.appendChild(item);
-            }});
-            
-            sidebar.appendChild(stopsList);
-            
-            // Add total distance and time
-            var totalInfo = document.createElement('div');
-            totalInfo.style.marginTop = '15px';
-            totalInfo.style.fontWeight = 'bold';
-            totalInfo.innerHTML = 'Total Distance: {total_km:.1f} km<br>Total Time: {total_hours:.1f} hours';
-            sidebar.appendChild(totalInfo);
-            
             return sidebar;
         }}
         
-        // Function to populate the dropdowns with stops in sequential order
+        // Function to update progress
+        function updateProgress() {{
+            var progressFill = document.getElementById('progress-fill');
+            var completedCount = document.getElementById('completed-count');
+            var progress = (deliveryProgress.completed / deliveryProgress.total) * 100;
+            
+            progressFill.style.width = progress + '%';
+            completedCount.textContent = deliveryProgress.completed + '/' + deliveryProgress.total;
+            
+            // Update header progress
+            var header = document.querySelector('#sidebar > div:first-child');
+            header.querySelector('div:nth-child(2) > div:nth-child(2)').textContent = 
+                deliveryProgress.completed + '/' + deliveryProgress.total + ' Stops';
+        }}
+        
+        // Function to populate the dropdowns
         function populateDropdowns() {{
             var startSelect = document.getElementById('start-select');
             var endSelect = document.getElementById('end-select');
@@ -515,7 +728,6 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
             // Sort stops by label name to get sequential order
             var sortedStops = [...routeData].filter(stop => !stop.label.includes('Warehouse'))
                 .sort((a, b) => {{
-                    // Extract numeric part from Stop labels (e.g., "Stop10" -> 10)
                     const aNum = parseInt(a.label.replace(/\D/g, '')) || 0;
                     const bNum = parseInt(b.label.replace(/\D/g, '')) || 0;
                     return aNum - bNum;
@@ -535,75 +747,26 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
             }});
         }}
         
-        // Function to highlight stops in the list
-        function highlightStops(startId, endId) {{
-            // Reset all stops to normal styling
-            routeData.forEach(function(stop) {{
-                var item = document.getElementById('stop-item-' + stop.id);
-                if (item) {{
-                    item.style.backgroundColor = '';
-                    item.style.padding = '';
-                    item.style.borderRadius = '';
-                }}
-            }});
+        // Function to handle dropdown changes
+        function handleDropdownChange() {{
+            var startId = document.getElementById('start-select').value;
+            var endId = document.getElementById('end-select').value;
             
-            // Highlight selected stops
-            var startItem = document.getElementById('stop-item-' + startId);
-            var endItem = document.getElementById('stop-item-' + endId);
-            
-            if (startItem) {{
-                startItem.style.backgroundColor = '#e6f7ff';
-                startItem.style.padding = '5px';
-                startItem.style.borderRadius = '4px';
+            if(startId && endId && startId !== endId) {{
+                document.getElementById('show-route-button').style.display = 'block';
+            }} else {{
+                document.getElementById('show-route-button').style.display = 'none';
             }}
-            
-            if (endItem) {{
-                endItem.style.backgroundColor = '#e6fff7';
-                endItem.style.padding = '5px';
-                endItem.style.borderRadius = '4px';
-            }}
-        }}
-        
-        // Function to reset the route selection
-        function resetRouteSelection() {{
-            // Clear dropdowns
-            document.getElementById('start-select').value = '';
-            document.getElementById('end-select').value = '';
-            
-            // Hide route info and reset button
-            document.getElementById('route-info').style.display = 'none';
-            document.getElementById('reset-button').style.display = 'none';
-            
-            // Remove custom route from map
-            if(window.customRouteLayer) {{
-                window.customRouteLayer.remove();
-                window.customRouteLayer = null;
-            }}
-            
-            // Remove custom markers
-            if(window.startMarker) {{
-                window.startMarker.remove();
-                window.startMarker = null;
-            }}
-            
-            if(window.endMarker) {{
-                window.endMarker.remove();
-                window.endMarker = null;
-            }}
-            
-            // Reset highlighted stops
-            routeData.forEach(function(stop) {{
-                var item = document.getElementById('stop-item-' + stop.id);
-                if (item) {{
-                    item.style.backgroundColor = '';
-                    item.style.padding = '';
-                    item.style.borderRadius = '';
-                }}
-            }});
         }}
         
         // Function to display a custom route
         function displayCustomRoute() {{
+            // Check if map and feature groups are initialized
+            if (!window.map || !window.custom_route_group) {{
+                console.error('Map or feature groups not initialized yet. Please wait a moment and try again.');
+                return;
+            }}
+
             var startId = parseInt(document.getElementById('start-select').value);
             var endId = parseInt(document.getElementById('end-select').value);
             
@@ -611,81 +774,67 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
                 return;
             }}
             
-            // Clear existing custom route and markers if any
-            if(window.customRouteLayer) {{
-                window.customRouteLayer.remove();
-            }}
-            
-            if(window.startMarker) {{
-                window.startMarker.remove();
-            }}
-            
-            if(window.endMarker) {{
-                window.endMarker.remove();
-            }}
-            
-            // Create a new feature group for the custom route
-            window.customRouteLayer = L.featureGroup();
-            
             // Get the selected locations
             var startStop = routeData.find(stop => stop.id === startId);
             var endStop = routeData.find(stop => stop.id === endId);
             
             if(!startStop || !endStop) {{
+                console.error('Could not find selected stops:', {{ startId: startId, endId: endId }});
                 return;
             }}
             
-            // Show the reset button
+            // Show the reset button and hide the show route button
             document.getElementById('reset-button').style.display = 'block';
+            document.getElementById('show-route-button').style.display = 'none';
             
-            // Add custom markers for the selected stops
-            window.startMarker = L.circleMarker(startStop.coords, {{
-                radius: 12,
-                fillColor: '#4a89dc',
-                color: '#000',
-                weight: 1,
-                opacity: 1,
-                fillOpacity: 0.8
-            }}).addTo(map);
-            
-            window.endMarker = L.circleMarker(endStop.coords, {{
-                radius: 12,
-                fillColor: '#37bc9b',
-                color: '#000',
-                weight: 1,
-                opacity: 1,
-                fillOpacity: 0.8
-            }}).addTo(map);
-            
-            // Try to get the geometry for this route
+            // Create custom route using Folium's methods
             var routeKey = startId + ',' + endId;
             var geometry = routeGeometries[routeKey];
             
+            // Clear any existing custom route
+            window.custom_route_group.clearLayers();
+            
             if(geometry) {{
                 // Add the actual road path
-                L.polyLine(
+                L.polyline(
                     geometry,
                     {{
-                        color: '#ff6600',
+                        color: '#FF3D00',
                         weight: 6,
                         opacity: 0.9
                     }}
-                ).addTo(window.customRouteLayer);
+                ).addTo(window.custom_route_group);
             }} else {{
                 // Fallback to straight line
-                L.polyLine(
+                L.polyline(
                     [startStop.coords, endStop.coords],
                     {{
-                        color: '#ff6600',
+                        color: '#FF3D00',
                         weight: 6,
                         opacity: 0.9,
                         dashArray: '10, 10'
                     }}
-                ).addTo(window.customRouteLayer);
+                ).addTo(window.custom_route_group);
             }}
             
-            // Add to map
-            window.customRouteLayer.addTo(map);
+            // Add markers for start and end points
+            L.circleMarker(startStop.coords, {{
+                radius: 14,
+                fillColor: '#1E88E5',
+                color: '#000',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.9
+            }}).addTo(window.custom_route_group);
+            
+            L.circleMarker(endStop.coords, {{
+                radius: 14,
+                fillColor: '#43A047',
+                color: '#000',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.9
+            }}).addTo(window.custom_route_group);
             
             // Update route info
             var routeInfo = document.getElementById('route-info');
@@ -702,35 +851,106 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
                 }}
             }});
             
-            var infoHtml = '<strong>From:</strong> ' + startStop.label + '<br>' +
-                        '<strong>To:</strong> ' + endStop.label + '<br>';
+            // Extract location names
+            var startLocationName = startStop.label.split(':')[1] || startStop.address.split(',')[0];
+            var endLocationName = endStop.label.split(':')[1] || endStop.address.split(',')[0];
+            startLocationName = startLocationName.trim();
+            endLocationName = endLocationName.trim();
+            
+            var infoHtml = `
+                <div style="margin-bottom: 10px;">
+                    <div style="color: #2c3e50; font-weight: bold; margin-bottom: 5px;">From:</div>
+                    <div style="color: #34495e;">${{startLocationName}}</div>
+                    <div style="color: #7f8c8d; font-size: 0.9em;">${{startStop.address}}</div>
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <div style="color: #2c3e50; font-weight: bold; margin-bottom: 5px;">To:</div>
+                    <div style="color: #34495e;">${{endLocationName}}</div>
+                    <div style="color: #7f8c8d; font-size: 0.9em;">${{endStop.address}}</div>
+                </div>
+            `;
             
             if(directDistance !== null && directDuration !== null) {{
-                infoHtml += '<strong>Distance:</strong> ' + directDistance.toFixed(1) + ' km<br>' +
-                        '<strong>Estimated Time:</strong> ' + directDuration.toFixed(0) + ' minutes';
+                infoHtml += `
+                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e9ecef;">
+                        <div style="display: flex; justify-content: space-between;">
+                            <div>
+                                <div style="color: #2c3e50; font-weight: bold;">Distance</div>
+                                <div style="color: #34495e;">${{directDistance.toFixed(1)}} km</div>
+                            </div>
+                            <div>
+                                <div style="color: #2c3e50; font-weight: bold;">Est. Time</div>
+                                <div style="color: #34495e;">${{directDuration.toFixed(0)}} min</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
             }} else {{
-                infoHtml += '<em>Direct route information not available.</em>';
+                infoHtml += `
+                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e9ecef;">
+                        <div style="color: #7f8c8d; font-style: italic;">
+                            Direct route information not available.
+                        </div>
+                    </div>
+                `;
             }}
             
             routeInfo.innerHTML = infoHtml;
             
-            // Highlight the selected stops in the list
-            highlightStops(startId, endId);
+            // Show the custom route group and hide the optimized route
+            if (window.optimized_route_group) {{
+                window.map.removeLayer(window.optimized_route_group);
+            }}
+            
+            // Fit the map to show the route
+            window.map.fitBounds(window.custom_route_group.getBounds(), {{
+                padding: [50, 50]
+            }});
         }}
-    </script>
-
-    <script>
+        
+        // Function to reset the route selection
+        function resetRouteSelection() {{
+            // Clear dropdowns
+            document.getElementById('start-select').value = '';
+            document.getElementById('end-select').value = '';
+            
+            // Hide route info, reset button and show route button
+            document.getElementById('route-info').style.display = 'none';
+            document.getElementById('reset-button').style.display = 'none';
+            document.getElementById('show-route-button').style.display = 'none';
+            
+            // Clear the custom route group
+            if (window.custom_route_group) {{
+                window.custom_route_group.clearLayers();
+            }}
+            
+            // Show the optimized route group
+            if (window.optimized_route_group) {{
+                window.map.addLayer(window.optimized_route_group);
+            }}
+        }}
+        
+        // Initialize the sidebar when the document is ready
         document.addEventListener('DOMContentLoaded', function() {{
-            // Add the sidebar to the map
-            document.body.appendChild(createSidebar());
+            // Create and append the sidebar
+            var sidebar = createSidebar();
+            document.body.appendChild(sidebar);
             
             // Populate the dropdowns
             populateDropdowns();
             
-            // Add event listeners
-            document.getElementById('start-select').addEventListener('change', displayCustomRoute);
-            document.getElementById('end-select').addEventListener('change', displayCustomRoute);
+            // Add event listeners for the dropdowns
+            document.getElementById('start-select').addEventListener('change', handleDropdownChange);
+            document.getElementById('end-select').addEventListener('change', handleDropdownChange);
+            
+            // Add event listener for the show route button
+            document.getElementById('show-route-button').addEventListener('click', displayCustomRoute);
+            
+            // Add event listener for the reset button
             document.getElementById('reset-button').addEventListener('click', resetRouteSelection);
+            
+            // Initialize progress
+            updateProgress();
         }});
     </script>
     """
