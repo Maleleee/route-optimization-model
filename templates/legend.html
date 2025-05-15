@@ -1,43 +1,56 @@
-<div id="mapLegend" style="position: fixed; 
-            bottom: 50px; right: 50px; width: 260px; 
-            background-color: white; border:2px solid grey; z-index:9999; 
-            padding: 10px; border-radius: 5px; font-family: Arial, sans-serif;">
-    <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">Route Legend</div>
-    
-    <!-- Optimized Route Section -->
-    <div style="font-weight: bold; font-size: 12px; margin: 5px 0;">Optimized Route:</div>
-    <div style="display: flex; align-items: center; margin-bottom: 4px;">
-        <div style="background: green; width: 15px; height: 3px; display: inline-block; margin-right: 5px;"></div>
-        <div style="display: inline-block;">Actual Road Path</div>
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Route Optimization Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+    <style>
+        #map { width: 100%; height: 100vh; }
+        #sidebar {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            width: 320px;
+            max-height: 90%;
+            overflow-y: auto;
+            background-color: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            z-index: 1000;
+            font-family: Arial, sans-serif;
+        }
+        #mapLegend {
+            position: fixed;
+            bottom: 50px;
+            right: 50px;
+            width: 220px;
+            background-color: white;
+            border: 2px solid grey;
+            z-index: 9999;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="sidebar">
+        <h2>Delivery Route Planner</h2>
+        <button onclick="optimizeRoute()">Optimize Route</button>
+        <ul id="stops-list"></ul>
+        <div id="route-info"></div>
     </div>
-    <div style="display: flex; align-items: center; margin-bottom: 4px;">
-        <div style="background: red; width: 15px; height: 3px; display: inline-block; margin-right: 5px;"></div>
-        <div style="display: inline-block;">Straight Path (Missing Road Data)</div>
+    <div id="mapLegend">
+        <h3>Legend</h3>
+        <ul>
+            <li><span style="color: blue;">●</span> Optimized Route</li>
+            <li><span style="color: red;">●</span> Delivery Stops</li>
+        </ul>
     </div>
-    
-    <!-- Custom Route Section -->
-    <div style="font-weight: bold; font-size: 12px; margin: 10px 0 5px;">Custom Route:</div>
-    <div style="display: flex; align-items: center; margin-bottom: 4px;">
-        <div style="background: #FF3D00; width: 15px; height: 4px; display: inline-block; margin-right: 5px;"></div>
-        <div style="display: inline-block;">Selected Route Path</div>
-    </div>
-    <div style="display: flex; align-items: center; margin-bottom: 4px;">
-        <div style="color: #1E88E5; font-size: 15px; margin-right: 5px;">⬤</div>
-        <div style="display: inline-block;">Starting Point</div>
-    </div>
-    <div style="display: flex; align-items: center; margin-bottom: 8px;">
-        <div style="color: #43A047; font-size: 15px; margin-right: 5px;">⬤</div>
-        <div style="display: inline-block;">Ending Point</div>
-    </div>
-    
-    <!-- Locations Section -->
-    <div style="font-weight: bold; font-size: 12px; margin: 10px 0 5px;">Locations:</div>
-    <div style="display: flex; align-items: center; margin-bottom: 4px;">
-        <div style="color: blue; font-size: 15px; margin-right: 5px;">⬤</div>
-        <div style="display: inline-block;">Delivery Stop</div>
-    </div>
-    <div style="display: flex; align-items: center;">
-        <div style="color: red; font-size: 15px; margin-right: 5px;">⬤</div>
-        <div style="display: inline-block;">Warehouse</div>
-    </div>
-</div> 
+</body>
+</html> 

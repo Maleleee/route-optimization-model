@@ -209,27 +209,33 @@ def create_interactive_map(df, best_order, route_geometries, distance_matrix, du
     map_center = [np.mean([coord[0] for coord in df["Coords"] if coord is not None]), 
                   np.mean([coord[1] for coord in df["Coords"] if coord is not None])]
     
-    # Create the map
-    route_map = folium.Map(location=map_center, zoom_start=11)
+    # Create the map with improved styling
+    route_map = folium.Map(
+        location=map_center, 
+        zoom_start=11,
+        tiles='OpenStreetMap',
+        attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    )
     
     # Create feature groups for different layers
     optimized_route_group = folium.FeatureGroup(name="Optimized Route", show=True)
     custom_route_group = folium.FeatureGroup(name="Custom Route", show=False)
     markers_group = folium.FeatureGroup(name="Delivery Stops", show=True)
     
-    # Add markers for all locations
+    # Add markers for all locations with improved styling
     for i, row in df.iterrows():
         if i == 0:  # Warehouse
-            icon = folium.Icon(color='red', icon='home')
+            icon = folium.Icon(color='red', icon='home', prefix='fa')
+            popup_text = f"<div style='font-family: Arial, sans-serif;'><strong style='color: #ea4335;'>{row['Label']}</strong><br>{row['Address']}</div>"
         else:
-            icon = folium.Icon(color='blue', icon='info-sign')
+            icon = folium.Icon(color='blue', icon='building', prefix='fa')
+            popup_text = f"<div style='font-family: Arial, sans-serif;'><strong style='color: #1a73e8;'>{row['Label']}</strong><br>{row['Address']}</div>"
         
-        popup_text = f"{row['Label']}: {row['Address']}"
         folium.Marker(
             location=row["Coords"],
-            popup=popup_text,
+            popup=folium.Popup(popup_text, max_width=300),
             icon=icon,
-            tooltip=row['Label']
+            tooltip=f"<div style='font-family: Arial, sans-serif;'>{row['Label']}</div>"
         ).add_to(markers_group)
     
     # Add route lines with actual road geometry
@@ -242,34 +248,109 @@ def create_interactive_map(df, best_order, route_geometries, distance_matrix, du
         if route_key in route_geometries and route_geometries[route_key]:
             path = route_geometries[route_key]
             
-            # Add the actual road path
+            # Calculate stats for this leg
+            distance_km = distance_matrix[start_idx, end_idx] / 1000  # Convert to km
+            duration_min = duration_matrix[start_idx, end_idx] / 60  # Convert to minutes
+            
+            # Create a detailed popup for the route segment
+            popup_text = f"""
+            <div style='font-family: Arial, sans-serif; min-width: 200px'>
+                <div style='border-bottom: 2px solid #34a853; margin-bottom: 8px; padding-bottom: 4px;'>
+                    <strong style='color: #202124; font-size: 14px;'>Route Segment {i+1}</strong>
+                </div>
+                <div style='margin-bottom: 5px;'>
+                    <span style='color: #5f6368;'>From:</span> <strong>{df.iloc[start_idx]['Label']}</strong>
+                </div>
+                <div style='margin-bottom: 8px;'>
+                    <span style='color: #5f6368;'>To:</span> <strong>{df.iloc[end_idx]['Label']}</strong>
+                </div>
+                <div style='display: flex; justify-content: space-between; margin-top: 8px; border-top: 1px solid #e8eaed; padding-top: 8px;'>
+                    <div>
+                        <span style='color: #5f6368; font-size: 12px;'>Distance</span><br>
+                        <strong style='color: #1a73e8;'>{distance_km:.1f} km</strong>
+                    </div>
+                    <div>
+                        <span style='color: #5f6368; font-size: 12px;'>Est. Time</span><br>
+                        <strong style='color: #1a73e8;'>{duration_min:.0f} min</strong>
+                    </div>
+                </div>
+            </div>
+            """
+            
+            # Add the actual road path with improved styling
             folium.PolyLine(
                 locations=path,
-                color='green',
-                weight=4,
-                opacity=0.8,
-                popup=f"Leg {i+1}: {df.iloc[start_idx]['Label']} to {df.iloc[end_idx]['Label']}",
-                tooltip=f"Leg {i+1}: {df.iloc[start_idx]['Label']} → {df.iloc[end_idx]['Label']}"
+                color='#0b8043',
+                weight=6,
+                opacity=0.9,
+                popup=folium.Popup(popup_text, max_width=300),
+                tooltip=f"<div style='font-family: Arial, sans-serif;'>{df.iloc[start_idx]['Label']} → {df.iloc[end_idx]['Label']}</div>"
             ).add_to(optimized_route_group)
         else:
             # Fallback to straight line if no geometry available
             start_coords = df.iloc[start_idx]["Coords"]
             end_coords = df.iloc[end_idx]["Coords"]
             
+            # Calculate stats for this leg
+            distance_km = distance_matrix[start_idx, end_idx] / 1000  # Convert to km
+            duration_min = duration_matrix[start_idx, end_idx] / 60  # Convert to minutes
+            
+            # Create a detailed popup for the route segment
+            popup_text = f"""
+            <div style='font-family: Arial, sans-serif; min-width: 200px'>
+                <div style='border-bottom: 2px solid #ea4335; margin-bottom: 8px; padding-bottom: 4px;'>
+                    <strong style='color: #202124; font-size: 14px;'>Route Segment {i+1}</strong>
+                    <div style='color: #ea4335; font-size: 12px;'>(Road data unavailable)</div>
+                </div>
+                <div style='margin-bottom: 5px;'>
+                    <span style='color: #5f6368;'>From:</span> <strong>{df.iloc[start_idx]['Label']}</strong>
+                </div>
+                <div style='margin-bottom: 8px;'>
+                    <span style='color: #5f6368;'>To:</span> <strong>{df.iloc[end_idx]['Label']}</strong>
+                </div>
+                <div style='display: flex; justify-content: space-between; margin-top: 8px; border-top: 1px solid #e8eaed; padding-top: 8px;'>
+                    <div>
+                        <span style='color: #5f6368; font-size: 12px;'>Distance</span><br>
+                        <strong style='color: #1a73e8;'>{distance_km:.1f} km</strong>
+                    </div>
+                    <div>
+                        <span style='color: #5f6368; font-size: 12px;'>Est. Time</span><br>
+                        <strong style='color: #1a73e8;'>{duration_min:.0f} min</strong>
+                    </div>
+                </div>
+            </div>
+            """
+            
             folium.PolyLine(
                 locations=[start_coords, end_coords],
-                color='red',  # Use red to indicate missing road data
-                weight=2,
-                opacity=0.7,
-                popup=f"Leg {i+1}: {df.iloc[start_idx]['Label']} to {df.iloc[end_idx]['Label']} (no road data)",
-                tooltip=f"Leg {i+1}: {df.iloc[start_idx]['Label']} → {df.iloc[end_idx]['Label']}"
+                color='#d93025',  # Use red to indicate missing road data
+                weight=4,
+                opacity=0.9,
+                dash_array='5, 10',
+                popup=folium.Popup(popup_text, max_width=300),
+                tooltip=f"<div style='font-family: Arial, sans-serif;'>{df.iloc[start_idx]['Label']} → {df.iloc[end_idx]['Label']} (no road data)</div>"
             ).add_to(optimized_route_group)
         
-        # Add a marker for the route number
+        # Add a marker for the route number with improved styling
         mid_point = df.iloc[end_idx]["Coords"]
         folium.Marker(
             location=mid_point,
-            icon=folium.DivIcon(html=f"<div style='font-size:10pt;color:black;font-weight:bold;background-color:white;border-radius:50%;padding:3px;border:2px solid green'>{i+1}</div>"),
+            icon=folium.DivIcon(html=f"""
+                <div style='
+                    font-size: 12px;
+                    color: white;
+                    background-color: #0b8043;
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 50%;
+                    line-height: 24px;
+                    text-align: center;
+                    font-weight: bold;
+                    font-family: Arial, sans-serif;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                    border: 2px solid white;'
+                >{i+1}</div>
+            """),
         ).add_to(optimized_route_group)
     
     # Add all feature groups to the map
@@ -277,8 +358,8 @@ def create_interactive_map(df, best_order, route_geometries, distance_matrix, du
     optimized_route_group.add_to(route_map)
     custom_route_group.add_to(route_map)
     
-    # Add layer control
-    folium.LayerControl().add_to(route_map)
+    # Add layer control with improved styling
+    folium.LayerControl(position='topright').add_to(route_map)
     
     # Make feature groups available to JavaScript
     route_map.get_root().html.add_child(folium.Element("""
@@ -336,6 +417,19 @@ def create_interactive_map(df, best_order, route_geometries, distance_matrix, du
             document.addEventListener('DOMContentLoaded', function() {
                 console.log('Document ready, initializing feature groups...');
                 initializeFeatureGroups();
+                
+                // Style the layer control
+                setTimeout(function() {
+                    const layerControls = document.querySelectorAll('.leaflet-control-layers');
+                    if (layerControls.length > 0) {
+                        layerControls.forEach(control => {
+                            control.style.fontFamily = 'Arial, sans-serif';
+                            control.style.borderRadius = '8px';
+                            control.style.overflow = 'hidden';
+                            control.style.boxShadow = '0 2px 10px rgba(0,0,0,0.1)';
+                        });
+                    }
+                }, 500);
             });
             
             // Also try to initialize when the map is loaded
@@ -348,30 +442,167 @@ def create_interactive_map(df, best_order, route_geometries, distance_matrix, du
     
     # Add an improved legend with better styling
     legend_html = '''
-    <div id="mapLegend" style="position: fixed; 
-                bottom: 50px; right: 50px; width: 220px; 
-                background-color: white; border:2px solid grey; z-index:9999; 
-                padding: 10px; border-radius: 5px; font-family: Arial, sans-serif;">
-        <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px;">Route Legend</div>
-        <div style="display: flex; align-items: center; margin-bottom: 4px;">
-            <div style="background: green; width: 15px; height: 3px; display: inline-block; margin-right: 5px;"></div>
-            <div style="display: inline-block;">Actual Road Path</div>
+    <div id="mapLegend" style="
+        position: fixed; 
+        bottom: 20px; 
+        right: 20px; 
+        width: 240px; 
+        background-color: white; 
+        border: none;
+        z-index: 9999; 
+        padding: 15px; 
+        border-radius: 10px; 
+        font-family: Arial, sans-serif;
+        box-shadow: 0 2px 15px rgba(0,0,0,0.1);">
+        
+        <div style="font-weight: bold; font-size: 16px; margin-bottom: 12px; color: #202124; border-bottom: 2px solid #1a73e8; padding-bottom: 8px;">Route Legend</div>
+        
+        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+            <div style="background: #0b8043; width: 30px; height: 4px; display: inline-block; margin-right: 10px; border-radius: 2px;"></div>
+            <div style="display: inline-block; color: #3c4043;">Optimized Road Path</div>
         </div>
-        <div style="display: flex; align-items: center; margin-bottom: 4px;">
-            <div style="background: red; width: 15px; height: 3px; display: inline-block; margin-right: 5px;"></div>
-            <div style="display: inline-block;">Straight Path (Missing Road Data)</div>
+        
+        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+            <div style="background: #d93025; width: 30px; height: 4px; display: inline-block; margin-right: 10px; border-radius: 2px; border-top: 1px solid transparent; border-bottom: 1px solid transparent; background-image: repeating-linear-gradient(to right, #d93025, #d93025 5px, transparent 5px, transparent 10px);"></div>
+            <div style="display: inline-block; color: #3c4043;">Estimated Path (No Road Data)</div>
         </div>
-        <div style="display: flex; align-items: center; margin-bottom: 4px;">
-            <div style="color: blue; font-size: 15px; margin-right: 5px;">&#9679;</div>
-            <div style="display: inline-block;">Delivery Stop</div>
+        
+        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+            <div style="color: #1a73e8; font-size: 18px; margin-right: 10px; width: 30px; display: flex; justify-content: center;">
+                <i class="fa fa-building"></i>
+            </div>
+            <div style="display: inline-block; color: #3c4043;">Delivery Stop</div>
         </div>
+        
         <div style="display: flex; align-items: center;">
-            <div style="color: red; font-size: 15px; margin-right: 5px;">&#9679;</div>
-            <div style="display: inline-block;">Warehouse</div>
+            <div style="color: #ea4335; font-size: 18px; margin-right: 10px; width: 30px; display: flex; justify-content: center;">
+                <i class="fa fa-home"></i>
+            </div>
+            <div style="display: inline-block; color: #3c4043;">Warehouse</div>
+        </div>
+        
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e8eaed; font-size: 12px; color: #5f6368; text-align: center;">
+            Click on route segments or markers for details
         </div>
     </div>
     '''
     route_map.get_root().html.add_child(folium.Element(legend_html))
+    
+    # Add Font Awesome for better icons
+    route_map.get_root().header.add_child(folium.Element('''
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    '''))
+    
+    # Add responsive design
+    route_map.get_root().header.add_child(folium.Element('''
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                font-family: Arial, sans-serif;
+            }
+            
+            .folium-map {
+                position: absolute;
+                width: 100%;
+                height: 100%;
+                left: 0;
+                top: 0;
+            }
+            
+            /* Responsive styles for smaller screens */
+            @media screen and (max-width: 768px) {
+                #sidebar {
+                    width: 280px !important;
+                }
+                
+                #mapLegend {
+                    bottom: 10px !important;
+                    right: 10px !important;
+                    width: 200px !important;
+                    font-size: 12px !important;
+                }
+                
+                .leaflet-popup-content {
+                    max-width: 220px !important;
+                }
+            }
+            
+            /* Very small screens (mobile) */
+            @media screen and (max-width: 480px) {
+                #sidebar {
+                    width: 250px !important;
+                }
+                
+                #mapLegend {
+                    bottom: 5px !important;
+                    right: 5px !important;
+                    width: 180px !important;
+                    padding: 10px !important;
+                }
+                
+                .leaflet-popup-content {
+                    max-width: 180px !important;
+                }
+            }
+            
+            /* Improve scrollbar appearance */
+            ::-webkit-scrollbar {
+                width: 8px;
+                height: 8px;
+            }
+            
+            ::-webkit-scrollbar-track {
+                background: #f1f3f4;
+                border-radius: 10px;
+            }
+            
+            ::-webkit-scrollbar-thumb {
+                background: #dadce0;
+                border-radius: 10px;
+            }
+            
+            ::-webkit-scrollbar-thumb:hover {
+                background: #1a73e8;
+            }
+            
+            /* Smooth transitions for UI elements */
+            #sidebar, .leaflet-control, .leaflet-popup, #mapLegend {
+                transition: all 0.3s ease;
+            }
+            
+            /* Improve layer control appearance */
+            .leaflet-control-layers {
+                border-radius: 8px !important;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1) !important;
+                overflow: hidden !important;
+            }
+            
+            .leaflet-control-layers-toggle {
+                width: 36px !important;
+                height: 36px !important;
+                background-size: 20px 20px !important;
+            }
+            
+            .leaflet-control-layers-expanded {
+                padding: 10px !important;
+                background-color: white !important;
+                color: #3c4043 !important;
+                font-family: Arial, sans-serif !important;
+            }
+            
+            /* Improve popup appearance */
+            .leaflet-popup-content-wrapper {
+                border-radius: 10px !important;
+                box-shadow: 0 3px 14px rgba(0,0,0,0.2) !important;
+            }
+            
+            .leaflet-popup-tip {
+                box-shadow: 0 3px 14px rgba(0,0,0,0.2) !important;
+            }
+        </style>
+    '''))
     
     # Prepare route data for the interactive sidebar
     route_data = []
@@ -443,29 +674,29 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
             sidebar.style.maxHeight = '90%';
             sidebar.style.overflowY = 'auto';
             sidebar.style.backgroundColor = 'white';
-            sidebar.style.padding = '15px';
-            sidebar.style.borderRadius = '8px';
-            sidebar.style.boxShadow = '0 0 15px rgba(0,0,0,0.2)';
+            sidebar.style.padding = '20px';
+            sidebar.style.borderRadius = '12px';
+            sidebar.style.boxShadow = '0 4px 20px rgba(0,0,0,0.15)';
             sidebar.style.zIndex = '1000';
             sidebar.style.fontFamily = 'Arial, sans-serif';
             
             // Add header with improved styling
             var header = document.createElement('div');
-            header.style.marginBottom = '20px';
+            header.style.marginBottom = '25px';
             header.innerHTML = `
-                <h2 style="margin: 0 0 10px 0; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px;">
+                <h2 style="margin: 0 0 15px 0; color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 12px; font-size: 24px;">
                     Delivery Route Planner
                 </h2>
-                <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 15px;">
                     <div style="flex: 1;">
-                        <div style="font-size: 0.9em; color: #7f8c8d;">Today's Progress</div>
-                        <div style="font-size: 1.2em; font-weight: bold; color: #2c3e50;">
+                        <div style="font-size: 0.9em; color: #5f6368; margin-bottom: 4px;">Today's Progress</div>
+                        <div style="font-size: 1.3em; font-weight: bold; color: #202124;">
                             ${{deliveryProgress.completed}}/${{deliveryProgress.total}} Stops
                         </div>
                     </div>
                     <div style="flex: 1;">
-                        <div style="font-size: 0.9em; color: #7f8c8d;">Estimated Time</div>
-                        <div style="font-size: 1.2em; font-weight: bold; color: #2c3e50;">
+                        <div style="font-size: 0.9em; color: #5f6368; margin-bottom: 4px;">Estimated Time</div>
+                        <div style="font-size: 1.3em; font-weight: bold; color: #202124;">
                             {total_hours:.1f} hours
                         </div>
                     </div>
@@ -475,71 +706,49 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
             
             // Add progress bar
             var progressBar = document.createElement('div');
-            progressBar.style.height = '8px';
-            progressBar.style.backgroundColor = '#ecf0f1';
-            progressBar.style.borderRadius = '4px';
-            progressBar.style.marginBottom = '20px';
+            progressBar.style.height = '10px';
+            progressBar.style.backgroundColor = '#e8eaed';
+            progressBar.style.borderRadius = '5px';
+            progressBar.style.marginBottom = '25px';
             progressBar.style.overflow = 'hidden';
             
             var progressFill = document.createElement('div');
             progressFill.id = 'progress-fill';
             progressFill.style.height = '100%';
             progressFill.style.width = '0%';
-            progressFill.style.backgroundColor = '#3498db';
+            progressFill.style.backgroundColor = '#1a73e8';
             progressFill.style.transition = 'width 0.3s ease';
             
             progressBar.appendChild(progressFill);
             sidebar.appendChild(progressBar);
             
-            // Add About section
+            // Add Quick Tips section
             var aboutSection = document.createElement('div');
-            aboutSection.style.marginBottom = '20px';
-            aboutSection.style.padding = '15px';
+            aboutSection.style.marginBottom = '25px';
+            aboutSection.style.padding = '18px';
             aboutSection.style.backgroundColor = '#f8f9fa';
-            aboutSection.style.borderRadius = '8px';
+            aboutSection.style.borderRadius = '10px';
             aboutSection.style.border = '1px solid #e9ecef';
             aboutSection.innerHTML = `
-                <h3 style="margin: 0 0 10px 0; color: #2c3e50;">Quick Tips</h3>
-                <ul style="margin: 0; padding-left: 20px; color: #34495e;">
+                <h3 style="margin: 0 0 12px 0; color: #1a73e8; font-size: 18px;">Quick Tips</h3>
+                <ul style="margin: 0; padding-left: 20px; color: #3c4043; line-height: 1.5;">
                     <li>Click on stops to mark them as completed</li>
-                    <li>Use the "Show Route" button to plan your next delivery</li>
-                    <li>Check the estimated time for each leg of your journey</li>
-                    <li>Track your progress with the progress bar above</li>
+                    <li>Track your delivery progress with the progress bar</li>
+                    <li>Check estimated distance and time for each leg</li>
+                    <li>Use the map to visualize your optimized route</li>
                 </ul>
             `;
             sidebar.appendChild(aboutSection);
             
-            // Add route planning section
-            var planningSection = document.createElement('div');
-            planningSection.style.marginBottom = '20px';
-            planningSection.style.padding = '15px';
-            planningSection.style.backgroundColor = '#e8f4fc';
-            planningSection.style.borderRadius = '8px';
-            planningSection.innerHTML = `
-                <h3 style="margin: 0 0 15px 0; color: #2c3e50;">Plan Next Delivery</h3>
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 5px; color: #2c3e50; font-weight: bold;">Start Point:</label>
-                    <select id="start-select" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #bdc3c7;"></select>
-                </div>
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 5px; color: #2c3e50; font-weight: bold;">End Point:</label>
-                    <select id="end-select" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #bdc3c7;"></select>
-                </div>
-                <button id="show-route-button" style="width: 100%; padding: 10px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; display: none;">
-                    Show Route
-                </button>
-            `;
-            sidebar.appendChild(planningSection);
-            
-            // Add route info section
+            // Add route info section (previously used in "Plan Next Delivery")
             var routeInfo = document.createElement('div');
             routeInfo.id = 'route-info';
-            routeInfo.style.marginBottom = '20px';
-            routeInfo.style.padding = '15px';
-            routeInfo.style.backgroundColor = '#f8f9fa';
-            routeInfo.style.borderRadius = '8px';
+            routeInfo.style.marginBottom = '25px';
+            routeInfo.style.padding = '18px';
+            routeInfo.style.backgroundColor = '#e8f4fc';
+            routeInfo.style.borderRadius = '10px';
             routeInfo.style.display = 'none';
-            routeInfo.style.border = '1px solid #e9ecef';
+            routeInfo.style.border = '1px solid #c2e7ff';
             sidebar.appendChild(routeInfo);
             
             // Add reset button
@@ -547,25 +756,26 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
             resetButton.id = 'reset-button';
             resetButton.innerHTML = 'Reset Selection';
             resetButton.style.width = '100%';
-            resetButton.style.padding = '10px';
-            resetButton.style.backgroundColor = '#e74c3c';
+            resetButton.style.padding = '12px';
+            resetButton.style.backgroundColor = '#ea4335';
             resetButton.style.color = 'white';
             resetButton.style.border = 'none';
-            resetButton.style.borderRadius = '4px';
+            resetButton.style.borderRadius = '6px';
             resetButton.style.cursor = 'pointer';
             resetButton.style.fontWeight = 'bold';
             resetButton.style.display = 'none';
-            resetButton.style.marginBottom = '20px';
+            resetButton.style.marginBottom = '25px';
+            resetButton.style.boxShadow = '0 2px 6px rgba(0,0,0,0.1)';
             sidebar.appendChild(resetButton);
             
             // Add stops list section
             var stopsHeader = document.createElement('div');
             stopsHeader.style.marginBottom = '15px';
             stopsHeader.innerHTML = `
-                <h3 style="margin: 0; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 8px;">
+                <h3 style="margin: 0; color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 10px; font-size: 18px;">
                     Delivery Stops
                 </h3>
-                <div style="display: flex; justify-content: space-between; margin-top: 10px; color: #7f8c8d; font-size: 0.9em;">
+                <div style="display: flex; justify-content: space-between; margin-top: 10px; color: #5f6368; font-size: 0.9em;">
                     <span>Click to mark as completed</span>
                     <span id="completed-count">0/${{deliveryProgress.total}}</span>
                 </div>
@@ -581,13 +791,14 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
             routeData.forEach(function(stop) {{
                 var item = document.createElement('li');
                 item.id = 'stop-item-' + stop.id;
-                item.style.marginBottom = '10px';
-                item.style.padding = '12px';
-                item.style.borderRadius = '8px';
+                item.style.marginBottom = '15px';
+                item.style.padding = '15px';
+                item.style.borderRadius = '10px';
                 item.style.backgroundColor = '#f8f9fa';
                 item.style.cursor = 'pointer';
                 item.style.transition = 'all 0.2s ease';
                 item.style.border = '1px solid #e9ecef';
+                item.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
                 
                 // Extract stop number and location name
                 var stopNumber = stop.label.replace(/\D/g, '');
@@ -597,34 +808,64 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
                 item.innerHTML = `
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div style="flex: 1; margin-right: 15px;">
-                            <strong style="color: #2c3e50;">Stop #${{stopNumber}}: ${{locationName}}</strong>
-                            <div style="color: #7f8c8d; font-size: 0.9em; margin-top: 4px;">${{stop.address}}</div>
+                            <strong style="color: #202124; font-size: 16px;">Stop #${{stopNumber}}: ${{locationName}}</strong>
+                            <div style="color: #5f6368; font-size: 0.9em; margin-top: 6px;">${{stop.address}}</div>
                         </div>
-                        <div class="completion-indicator" style="width: 24px; height: 24px; min-width: 24px; border-radius: 50%; border: 2px solid #bdc3c7; background-color: white; flex-shrink: 0;"></div>
+                        <div class="completion-indicator" style="width: 24px; height: 24px; min-width: 24px; border-radius: 50%; border: 2px solid #bdc3c7; background-color: white; flex-shrink: 0; transition: all 0.2s ease;"></div>
                     </div>
                 `;
                 
                 if(stop.hasOwnProperty('distance_to_next')) {{
                     item.innerHTML += `
-                        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e9ecef;">
-                            <small style="color: #3498db;">
-                                Next: ${{stop.distance_to_next.toFixed(1)}} km, ${{stop.duration_to_next.toFixed(0)}} min
-                            </small>
+                        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #e9ecef;">
+                            <div style="display: flex; justify-content: space-between;">
+                                <small style="color: #1a73e8; font-weight: bold;">
+                                    ${{stop.distance_to_next.toFixed(1)}} km
+                                </small>
+                                <small style="color: #1a73e8; font-weight: bold;">
+                                    ${{stop.duration_to_next.toFixed(0)}} min
+                                </small>
+                            </div>
                         </div>
                     `;
                 }}
+                
+                // Add hover effect
+                item.onmouseover = function() {{
+                    this.style.backgroundColor = '#f1f3f4';
+                    this.style.boxShadow = '0 4px 8px rgba(0,0,0,0.1)';
+                }};
+                
+                item.onmouseout = function() {{
+                    if(!this.classList.contains('completed')) {{
+                        this.style.backgroundColor = '#f8f9fa';
+                        this.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                    }}
+                }};
                 
                 // Add click handler for completion
                 item.onclick = function() {{
                     if(!this.classList.contains('completed')) {{
                         this.classList.add('completed');
-                        this.style.backgroundColor = '#e8f5e9';
-                        this.style.border = '1px solid #4caf50';
+                        this.style.backgroundColor = '#e6f4ea';
+                        this.style.border = '1px solid #34a853';
+                        this.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
                         var indicator = this.querySelector('.completion-indicator');
-                        indicator.style.backgroundColor = '#4caf50';
-                        indicator.style.border = '2px solid #388e3c';
+                        indicator.style.backgroundColor = '#34a853';
+                        indicator.style.border = '2px solid #34a853';
                         
                         deliveryProgress.completed++;
+                        updateProgress();
+                    }} else {{
+                        this.classList.remove('completed');
+                        this.style.backgroundColor = '#f8f9fa';
+                        this.style.border = '1px solid #e9ecef';
+                        this.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                        var indicator = this.querySelector('.completion-indicator');
+                        indicator.style.backgroundColor = 'white';
+                        indicator.style.border = '2px solid #bdc3c7';
+                        
+                        deliveryProgress.completed--;
                         updateProgress();
                     }}
                 }};
@@ -636,21 +877,22 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
             
             // Add total distance and time
             var totalInfo = document.createElement('div');
-            totalInfo.style.marginTop = '20px';
-            totalInfo.style.padding = '15px';
-            totalInfo.style.backgroundColor = '#e8f4fc';
-            totalInfo.style.borderRadius = '8px';
+            totalInfo.style.marginTop = '25px';
+            totalInfo.style.padding = '18px';
+            totalInfo.style.backgroundColor = '#e6f4ea';
+            totalInfo.style.borderRadius = '10px';
             totalInfo.style.fontWeight = 'bold';
-            totalInfo.style.color = '#2c3e50';
+            totalInfo.style.color = '#202124';
+            totalInfo.style.border = '1px solid #ceead6';
             totalInfo.innerHTML = `
                 <div style="display: flex; justify-content: space-between;">
                     <div>
-                        <div style="font-size: 0.9em; color: #7f8c8d;">Total Distance</div>
-                        <div style="font-size: 1.2em;">{total_km:.1f} km</div>
+                        <div style="font-size: 0.9em; color: #5f6368; margin-bottom: 4px;">Total Distance</div>
+                        <div style="font-size: 1.3em;">{total_km:.1f} km</div>
                     </div>
                     <div>
-                        <div style="font-size: 0.9em; color: #7f8c8d;">Total Time</div>
-                        <div style="font-size: 1.2em;">{total_hours:.1f} hours</div>
+                        <div style="font-size: 0.9em; color: #5f6368; margin-bottom: 4px;">Total Time</div>
+                        <div style="font-size: 1.3em;">{total_hours:.1f} hours</div>
                     </div>
                 </div>
             `;
@@ -660,15 +902,16 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
             var toggleButton = document.createElement('button');
             toggleButton.innerHTML = '&laquo;';
             toggleButton.style.position = 'absolute';
-            toggleButton.style.right = '-30px';
+            toggleButton.style.right = '-36px';
             toggleButton.style.top = '10px';
-            toggleButton.style.backgroundColor = '#3498db';
+            toggleButton.style.backgroundColor = '#1a73e8';
             toggleButton.style.color = 'white';
             toggleButton.style.border = 'none';
-            toggleButton.style.borderRadius = '0 4px 4px 0';
-            toggleButton.style.padding = '8px 12px';
+            toggleButton.style.borderRadius = '0 6px 6px 0';
+            toggleButton.style.padding = '10px 14px';
             toggleButton.style.cursor = 'pointer';
             toggleButton.style.fontSize = '16px';
+            toggleButton.style.boxShadow = '2px 0 8px rgba(0,0,0,0.1)';
             toggleButton.onclick = function() {{
                 if(sidebar.style.left === '10px') {{
                     sidebar.style.left = '-330px';
@@ -698,226 +941,11 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
                 deliveryProgress.completed + '/' + deliveryProgress.total + ' Stops';
         }}
         
-        // Function to populate the dropdowns
-        function populateDropdowns() {{
-            var startSelect = document.getElementById('start-select');
-            var endSelect = document.getElementById('end-select');
-            
-            // Add a default option
-            var defaultStart = document.createElement('option');
-            defaultStart.value = '';
-            defaultStart.innerHTML = 'Select a starting point...';
-            startSelect.appendChild(defaultStart);
-            
-            var defaultEnd = document.createElement('option');
-            defaultEnd.value = '';
-            defaultEnd.innerHTML = 'Select a destination...';
-            endSelect.appendChild(defaultEnd);
-            
-            // First add the warehouse
-            var warehouseStop = routeData.find(stop => stop.label.includes('Warehouse'));
-            if (warehouseStop) {{
-                var warehouseOption = document.createElement('option');
-                warehouseOption.value = warehouseStop.id;
-                warehouseOption.innerHTML = warehouseStop.label + ': ' + warehouseStop.address;
-                
-                startSelect.appendChild(warehouseOption.cloneNode(true));
-                endSelect.appendChild(warehouseOption.cloneNode(true));
-            }}
-            
-            // Sort stops by label name to get sequential order
-            var sortedStops = [...routeData].filter(stop => !stop.label.includes('Warehouse'))
-                .sort((a, b) => {{
-                    const aNum = parseInt(a.label.replace(/\D/g, '')) || 0;
-                    const bNum = parseInt(b.label.replace(/\D/g, '')) || 0;
-                    return aNum - bNum;
-                }});
-            
-            // Add all locations to both dropdowns in sequential order
-            sortedStops.forEach(function(stop) {{
-                var startOption = document.createElement('option');
-                startOption.value = stop.id;
-                startOption.innerHTML = stop.label + ': ' + stop.address;
-                startSelect.appendChild(startOption);
-                
-                var endOption = document.createElement('option');
-                endOption.value = stop.id;
-                endOption.innerHTML = stop.label + ': ' + stop.address;
-                endSelect.appendChild(endOption);
-            }});
-        }}
-        
-        // Function to handle dropdown changes
-        function handleDropdownChange() {{
-            var startId = document.getElementById('start-select').value;
-            var endId = document.getElementById('end-select').value;
-            
-            if(startId && endId && startId !== endId) {{
-                document.getElementById('show-route-button').style.display = 'block';
-            }} else {{
-                document.getElementById('show-route-button').style.display = 'none';
-            }}
-        }}
-        
-        // Function to display a custom route
-        function displayCustomRoute() {{
-            // Check if map and feature groups are initialized
-            if (!window.map || !window.custom_route_group) {{
-                console.error('Map or feature groups not initialized yet. Please wait a moment and try again.');
-                return;
-            }}
-
-            var startId = parseInt(document.getElementById('start-select').value);
-            var endId = parseInt(document.getElementById('end-select').value);
-            
-            if(isNaN(startId) || isNaN(endId) || startId === endId) {{
-                return;
-            }}
-            
-            // Get the selected locations
-            var startStop = routeData.find(stop => stop.id === startId);
-            var endStop = routeData.find(stop => stop.id === endId);
-            
-            if(!startStop || !endStop) {{
-                console.error('Could not find selected stops:', {{ startId: startId, endId: endId }});
-                return;
-            }}
-            
-            // Show the reset button and hide the show route button
-            document.getElementById('reset-button').style.display = 'block';
-            document.getElementById('show-route-button').style.display = 'none';
-            
-            // Create custom route using Folium's methods
-            var routeKey = startId + ',' + endId;
-            var geometry = routeGeometries[routeKey];
-            
-            // Clear any existing custom route
-            window.custom_route_group.clearLayers();
-            
-            if(geometry) {{
-                // Add the actual road path
-                L.polyline(
-                    geometry,
-                    {{
-                        color: '#FF3D00',
-                        weight: 6,
-                        opacity: 0.9
-                    }}
-                ).addTo(window.custom_route_group);
-            }} else {{
-                // Fallback to straight line
-                L.polyline(
-                    [startStop.coords, endStop.coords],
-                    {{
-                        color: '#FF3D00',
-                        weight: 6,
-                        opacity: 0.9,
-                        dashArray: '10, 10'
-                    }}
-                ).addTo(window.custom_route_group);
-            }}
-            
-            // Add markers for start and end points
-            L.circleMarker(startStop.coords, {{
-                radius: 14,
-                fillColor: '#1E88E5',
-                color: '#000',
-                weight: 2,
-                opacity: 1,
-                fillOpacity: 0.9
-            }}).addTo(window.custom_route_group);
-            
-            L.circleMarker(endStop.coords, {{
-                radius: 14,
-                fillColor: '#43A047',
-                color: '#000',
-                weight: 2,
-                opacity: 1,
-                fillOpacity: 0.9
-            }}).addTo(window.custom_route_group);
-            
-            // Update route info
-            var routeInfo = document.getElementById('route-info');
-            routeInfo.style.display = 'block';
-            
-            // Calculate direct distance and duration if available
-            var directDistance = null;
-            var directDuration = null;
-            
-            routeData.forEach(function(stop) {{
-                if(stop.id === startId && stop.next_stop_id === endId) {{
-                    directDistance = stop.distance_to_next;
-                    directDuration = stop.duration_to_next;
-                }}
-            }});
-            
-            // Extract location names
-            var startLocationName = startStop.label.split(':')[1] || startStop.address.split(',')[0];
-            var endLocationName = endStop.label.split(':')[1] || endStop.address.split(',')[0];
-            startLocationName = startLocationName.trim();
-            endLocationName = endLocationName.trim();
-            
-            var infoHtml = `
-                <div style="margin-bottom: 10px;">
-                    <div style="color: #2c3e50; font-weight: bold; margin-bottom: 5px;">From:</div>
-                    <div style="color: #34495e;">${{startLocationName}}</div>
-                    <div style="color: #7f8c8d; font-size: 0.9em;">${{startStop.address}}</div>
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <div style="color: #2c3e50; font-weight: bold; margin-bottom: 5px;">To:</div>
-                    <div style="color: #34495e;">${{endLocationName}}</div>
-                    <div style="color: #7f8c8d; font-size: 0.9em;">${{endStop.address}}</div>
-                </div>
-            `;
-            
-            if(directDistance !== null && directDuration !== null) {{
-                infoHtml += `
-                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e9ecef;">
-                        <div style="display: flex; justify-content: space-between;">
-                            <div>
-                                <div style="color: #2c3e50; font-weight: bold;">Distance</div>
-                                <div style="color: #34495e;">${{directDistance.toFixed(1)}} km</div>
-                            </div>
-                            <div>
-                                <div style="color: #2c3e50; font-weight: bold;">Est. Time</div>
-                                <div style="color: #34495e;">${{directDuration.toFixed(0)}} min</div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }} else {{
-                infoHtml += `
-                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e9ecef;">
-                        <div style="color: #7f8c8d; font-style: italic;">
-                            Direct route information not available.
-                        </div>
-                    </div>
-                `;
-            }}
-            
-            routeInfo.innerHTML = infoHtml;
-            
-            // Show the custom route group and hide the optimized route
-            if (window.optimized_route_group) {{
-                window.map.removeLayer(window.optimized_route_group);
-            }}
-            
-            // Fit the map to show the route
-            window.map.fitBounds(window.custom_route_group.getBounds(), {{
-                padding: [50, 50]
-            }});
-        }}
-        
         // Function to reset the route selection
         function resetRouteSelection() {{
-            // Clear dropdowns
-            document.getElementById('start-select').value = '';
-            document.getElementById('end-select').value = '';
-            
-            // Hide route info, reset button and show route button
+            // Hide route info and reset button
             document.getElementById('route-info').style.display = 'none';
             document.getElementById('reset-button').style.display = 'none';
-            document.getElementById('show-route-button').style.display = 'none';
             
             // Clear the custom route group
             if (window.custom_route_group) {{
@@ -935,16 +963,6 @@ def add_interactive_sidebar(route_map, route_data, geometries, total_km, total_h
             // Create and append the sidebar
             var sidebar = createSidebar();
             document.body.appendChild(sidebar);
-            
-            // Populate the dropdowns
-            populateDropdowns();
-            
-            // Add event listeners for the dropdowns
-            document.getElementById('start-select').addEventListener('change', handleDropdownChange);
-            document.getElementById('end-select').addEventListener('change', handleDropdownChange);
-            
-            // Add event listener for the show route button
-            document.getElementById('show-route-button').addEventListener('click', displayCustomRoute);
             
             // Add event listener for the reset button
             document.getElementById('reset-button').addEventListener('click', resetRouteSelection);
